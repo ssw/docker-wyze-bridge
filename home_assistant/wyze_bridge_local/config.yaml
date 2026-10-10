@@ -1,0 +1,120 @@
+name: Wyze Bridge (local only)
+description: >-
+  WebRTC/RTSP/HLS bridge for Wyze cameras.
+  Stream your Wyze cameras locally without cloud dependencies.
+slug: wyze_bridge_local
+url: https://github.com/ssw/docker-wyze-bridge
+version: 4.5.0-local.1
+stage: stable
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+hassio_api: true
+host_network: true
+ingress: false
+map:
+  - addon_config:rw
+  - media:rw
+services:
+  - mqtt:want
+options:
+  wyze:
+    email: ""
+    password: ""
+    api_id: ""
+    api_key: ""
+  bridge:
+    ip: ""
+  camera:
+    quality: hd
+    audio: true
+    options: []
+  snapshot: {}
+  record: {}
+  mqtt: {}
+  filter: {}
+  location: {}
+  webhooks: {}
+  gwell:
+    manual_ips: []
+  models:
+    overrides: []
+  debug: {}
+schema:
+  wyze:
+    email: email?
+    password: password?
+    api_id: str?
+    api_key: str?
+    totp_key: str?
+  bridge:
+    ip: 'match(^($|[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$))?'
+    auth: bool?
+    username: str?
+    password: password?
+    api_token: str?
+    stream_auth: str?
+    go2rtc_url: url?
+  camera:
+    quality: list(hd|sd)?
+    audio: bool?
+    options:
+      - cam_name: str?
+        quality: list(hd|sd)?
+        audio: bool?
+        record: bool?
+  snapshot:
+    path: str?
+    file_name: str?
+    interval: int?
+    keep: 'match(^\d+[smhd]?$)?'
+    cameras:
+      - str?
+  record:
+    all: bool?
+    path: str?
+    file_name: str?
+    length: 'match(^\d+[smhd]?$)?'
+    keep: 'match(^\d+[smhd]?$)?'
+  mqtt:
+    enabled: bool?
+    host: str?
+    port: port?
+    username: str?
+    password: password?
+    topic: str?
+    discovery_topic: str?
+  filter:
+    names:
+      - str?
+    models:
+      - str?
+    macs:
+      - str?
+    blocks: bool?
+  location:
+    latitude: float?
+    longitude: float?
+  webhooks:
+    urls:
+      - url?
+  gwell:
+    enabled: bool?
+    manual_ips:
+      - mac: str?
+        lan_ip: str?
+  models:
+    overrides:
+      - model: str?
+        name: str?
+        is_gwell: bool?
+        is_gwell_p2p: bool?
+        is_webrtc: bool?
+        is_pan: bool?
+        is_doorbell: bool?
+  debug:
+    log_level: list(trace|debug|info|warn|error)?
+    force_iotc_detail: bool?
