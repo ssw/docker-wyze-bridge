@@ -28,6 +28,14 @@ type Manager struct {
 	camMgr    *camera.Manager
 	go2rtcAPI *go2rtcmgr.APIClient
 	onCapture SnapshotFunc
+
+	latestMu sync.RWMutex
+	latest   map[string]frame // last good snapshot per camera, for Latest
+}
+
+type frame struct {
+	jpeg []byte
+	at   time.Time
 }
 
 // NewManager creates a new snapshot manager.
@@ -42,7 +50,24 @@ func NewManager(
 		cfg:       cfg,
 		camMgr:    camMgr,
 		go2rtcAPI: go2rtcAPI,
+		latest:    map[string]frame{},
 	}
+}
+
+// Latest returns the most recent snapshot captured for a camera and when
+// it was taken, so callers can serve a still image instantly instead of
+// waking the camera. ok is false until the first capture succeeds.
+func (m *Manager) Latest(name string) (jpeg []byte, at time.Time, ok bool) {
+	m.latestMu.RLock()
+	defer m.latestMu.RUnlock()
+	f, ok := m.latest[name]
+	return f.jpeg, f.at, ok
+}
+
+func (m *Manager) remember(name string, jpeg []byte, at time.Time) {
+	m.latestMu.Lock()
+	defer m.latestMu.Unlock()
+	m.latest[name] = frame{jpeg: jpeg, at: at}
 }
 
 // OnCapture registers a callback for when a snapshot is captured.
@@ -117,6 +142,7 @@ func (m *Manager) captureOne(ctx context.Context, name string) {
 		m.log.Debug().Err(err).Str("cam", name).Msg("snapshot capture failed")
 		return
 	}
+	m.remember(name, jpeg, time.Now())
 
 	// Save to disk
 	path, err := m.saveSnapshot(name, jpeg)

@@ -193,6 +193,19 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ?cached serves the periodic snapshot (SNAPSHOT_INTERVAL) without
+	// waking the camera, so dashboards polling many cameras stay fast.
+	// Falls through to a live grab until the first capture exists.
+	if r.URL.Query().Has("cached") && s.latestSnap != nil {
+		if jpeg, at, ok := s.latestSnap(name); ok {
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Last-Modified", at.UTC().Format(http.TimeFormat))
+			w.Write(jpeg)
+			return
+		}
+	}
+
 	go2rtc := s.go2rtc()
 	if go2rtc == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "bridge still starting; go2rtc not yet ready")

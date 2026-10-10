@@ -150,6 +150,51 @@ func TestHandleSnapshot_Missing(t *testing.T) {
 	}
 }
 
+func TestHandleSnapshot_CachedServesLatestWithoutGo2RTC(t *testing.T) {
+	srv, _ := testServer(t)
+	taken := time.Date(2026, 10, 10, 21, 0, 0, 0, time.UTC)
+	srv.OnLatestSnapshot(func(name string) ([]byte, time.Time, bool) {
+		if name != "front_door" {
+			return nil, time.Time{}, false
+		}
+		return []byte("\xff\xd8cached-jpeg"), taken, true
+	})
+
+	w := httptest.NewRecorder()
+	srv.handleSnapshot(w, httptest.NewRequest("GET", "/api/snapshot/front_door?cached", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if got := w.Body.String(); got != "\xff\xd8cached-jpeg" {
+		t.Errorf("body = %q, want the cached frame", got)
+	}
+	if got := w.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Errorf("Content-Type = %q, want image/jpeg", got)
+	}
+	if got := w.Header().Get("Last-Modified"); got != taken.Format(http.TimeFormat) {
+		t.Errorf("Last-Modified = %q, want %q", got, taken.Format(http.TimeFormat))
+	}
+}
+
+func TestHandleSnapshot_CachedFallsBackToLiveBeforeFirstCapture(t *testing.T) {
+	srv, _ := testServer(t)
+	srv.OnLatestSnapshot(func(string) ([]byte, time.Time, bool) {
+		return nil, time.Time{}, false
+	})
+
+	w := httptest.NewRecorder()
+	srv.handleSnapshot(w, httptest.NewRequest("GET", "/api/snapshot/backyard?cached", nil))
+
+	// No cached frame yet, so it grabs a live one from (fake) go2rtc.
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 from the live path", w.Code)
+	}
+	if got := w.Body.Bytes(); string(got) != string([]byte{0xFF, 0xD8, 0xFF, 0xE0}) {
+		t.Errorf("body = %x, want go2rtc's live frame", got)
+	}
+}
+
 // TestHandleAPICameraAction_Snapshot verifies the webui button → HTTP →
 // snapshot-manager wiring. The action handler fires the registered
 // OnSnapshotRequest callback in a goroutine; we sync via a channel so

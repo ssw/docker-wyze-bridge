@@ -521,6 +521,7 @@ func wireSnapshotHandlers(webServer *webui.Server, snapMgr *snapshot.Manager, mq
 	webServer.OnSnapshotRequest(func(ctx context.Context, camName string) {
 		snapMgr.CaptureOne(ctx, camName)
 	})
+	webServer.OnLatestSnapshot(snapMgr.Latest)
 }
 
 // wireMQTTCommands wires the MQTT command callbacks that aren't tied

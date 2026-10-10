@@ -29,6 +29,9 @@ var staticFS embed.FS
 // decoupled from the snapshot package (which depends on us via SSE).
 type SnapshotRequester func(ctx context.Context, camName string)
 
+// LatestSnapshot returns the last snapshot captured for a camera, if any.
+type LatestSnapshot func(camName string) (jpeg []byte, at time.Time, ok bool)
+
 // DiscoverRequester triggers a bridge-wide Wyze API rediscovery.
 // Supplied by main.go via OnDiscoverRequest so the webui stays
 // decoupled from camera.Manager.
@@ -56,6 +59,7 @@ type Server struct {
 	// shutdown. Set via SetRootContext; defaults to context.Background.
 	rootCtx       context.Context
 	onSnapReq     SnapshotRequester
+	latestSnap    LatestSnapshot
 	onDiscoverReq DiscoverRequester
 	mars          MarsTokenMinter
 	kvs           KVSStreamProvider
@@ -180,6 +184,12 @@ func (s *Server) SSE() *SSEHub {
 // Nil is safe — the button just returns 503 until the hook is attached.
 func (s *Server) OnSnapshotRequest(fn SnapshotRequester) {
 	s.onSnapReq = fn
+}
+
+// OnLatestSnapshot registers the source for GET /api/snapshot/<cam>?cached.
+// main.go wires this to snapMgr.Latest.
+func (s *Server) OnLatestSnapshot(fn LatestSnapshot) {
+	s.latestSnap = fn
 }
 
 // OnDiscoverRequest registers a callback that fires when the WebUI's

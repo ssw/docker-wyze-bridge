@@ -3,6 +3,8 @@ package snapshot
 import (
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 func TestExpandTemplate(t *testing.T) {
@@ -53,5 +55,25 @@ func TestContainsName(t *testing.T) {
 	}
 	if containsName(list, "garage") {
 		t.Error("should not match missing")
+	}
+}
+
+func TestLatest_RemembersTheMostRecentCapturePerCamera(t *testing.T) {
+	m := NewManager(nil, nil, nil, zerolog.Nop())
+	if _, _, ok := m.Latest("front_door"); ok {
+		t.Fatal("Latest should report nothing before any capture")
+	}
+
+	first := time.Date(2026, 10, 10, 21, 0, 0, 0, time.UTC)
+	m.remember("front_door", []byte("one"), first)
+	m.remember("front_door", []byte("two"), first.Add(time.Minute))
+	m.remember("backyard", []byte("yard"), first)
+
+	jpeg, at, ok := m.Latest("front_door")
+	if !ok || string(jpeg) != "two" || !at.Equal(first.Add(time.Minute)) {
+		t.Errorf("Latest(front_door) = %q, %v, %v; want the second capture", jpeg, at, ok)
+	}
+	if jpeg, _, _ := m.Latest("backyard"); string(jpeg) != "yard" {
+		t.Errorf("Latest(backyard) = %q, want its own frame", jpeg)
 	}
 }
