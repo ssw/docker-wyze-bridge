@@ -75,6 +75,7 @@ type ConfigBuilder struct {
 	logLevel   string
 	stunServer string
 	wbIP       string
+	localOnly  bool
 	streams    []StreamEntry
 	streamAuth []StreamAuthEntry
 }
@@ -96,6 +97,13 @@ func (b *ConfigBuilder) AddStream(entry StreamEntry) {
 // ClearStreams removes all streams.
 func (b *ConfigBuilder) ClearStreams() {
 	b.streams = nil
+}
+
+// SetLocalOnly binds go2rtc's API, RTSP and WebRTC listeners to
+// 127.0.0.1 and drops the wildcard CORS origin, so go2rtc is reachable
+// only from the same host.
+func (b *ConfigBuilder) SetLocalOnly(localOnly bool) {
+	b.localOnly = localOnly
 }
 
 // SetStreamAuth sets the parsed STREAM_AUTH entries.
@@ -143,15 +151,21 @@ func ParseStreamAuth(raw string) []StreamAuthEntry {
 
 // Build generates the Go2RTCConfig struct.
 func (b *ConfigBuilder) Build() *Go2RTCConfig {
+	host, origin := "", "*" // "*" lets the WebUI on :5080 use the WebRTC player
+	if b.localOnly {
+		// The WebUI reaches go2rtc through its same-origin proxy, so no
+		// cross-origin access is needed when everything is local.
+		host, origin = "127.0.0.1", ""
+	}
 	cfg := &Go2RTCConfig{
 		Log: LogConfig{Level: b.logLevel},
 		API: APIConfig{
-			Listen: ":1984",
-			Origin: "*", // needed for bridge WebUI on :5080 to use WebRTC player
+			Listen: host + ":1984",
+			Origin: origin,
 		},
-		RTSP: RTSPConfig{Listen: ":8554"},
+		RTSP: RTSPConfig{Listen: host + ":8554"},
 		WebRTC: WebRTCConfig{
-			Listen: ":8889",
+			Listen: host + ":8889",
 		},
 		// Streams is nil when empty so YAML omits the key entirely.
 		// go2rtc parses an empty flow-style `streams: {}` unreliably.
@@ -163,7 +177,7 @@ func (b *ConfigBuilder) Build() *Go2RTCConfig {
 		}
 	}
 
-	if b.wbIP != "" {
+	if b.wbIP != "" && !b.localOnly {
 		cfg.WebRTC.Candidates = []string{
 			fmt.Sprintf("%s:8889", b.wbIP),
 		}

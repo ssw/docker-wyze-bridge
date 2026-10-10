@@ -27,6 +27,11 @@ type Config struct {
 	BridgePassword string
 	BridgeAPIToken string // bearer token for REST API
 	STUNServer     string
+	// LocalOnly binds the WebUI and go2rtc (API, RTSP, WebRTC) to
+	// 127.0.0.1, so nothing is reachable from the network. For hosts
+	// where the only consumer runs on the same machine, e.g. Home
+	// Assistant OS, where the add-on and HA Core share the host network.
+	LocalOnly bool
 
 	// Stream Auth — go2rtc RTSP/WebRTC consumer credentials
 	StreamAuth string
@@ -151,6 +156,7 @@ func Load() (*Config, error) {
 		BridgePassword: env("BRIDGE_PASSWORD", ""),
 		BridgeAPIToken: env("BRIDGE_API_TOKEN", ""),
 		STUNServer:     env("STUN_SERVER", "stun:stun.l.google.com:19302"),
+		LocalOnly:      envBool("LOCAL_ONLY", false),
 
 		// Stream Auth
 		StreamAuth: env("STREAM_AUTH", ""),

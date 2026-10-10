@@ -200,15 +200,19 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
+	host := ""
+	if s.cfg.LocalOnly {
+		host = "127.0.0.1"
+	}
 	s.srv = &http.Server{
-		Addr:         fmt.Sprintf(":%d", s.cfg.BridgePort),
+		Addr:         fmt.Sprintf("%s:%d", host, s.cfg.BridgePort),
 		Handler:      s.corsMiddleware(s.logMiddleware(mux)),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	s.log.Info().Int("port", s.cfg.BridgePort).Msg("WebUI server starting")
+	s.log.Info().Str("addr", s.srv.Addr).Msg("WebUI server starting")
 	return s.srv.ListenAndServe()
 }
 

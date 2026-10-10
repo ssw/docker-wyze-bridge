@@ -685,6 +685,10 @@ func setupGo2RTC(ctx context.Context, cfg *config.Config, camMgr *camera.Manager
 		logLevel = "debug"
 	}
 	configBuilder := go2rtcmgr.NewConfigBuilder(logLevel, cfg.STUNServer, cfg.BridgeIP)
+	configBuilder.SetLocalOnly(cfg.LocalOnly)
+	if cfg.LocalOnly {
+		log.Info().Msg("LOCAL_ONLY: WebUI and go2rtc listen on 127.0.0.1 only")
+	}
 
 	if cfg.StreamAuth != "" {
 		entries := go2rtcmgr.ParseStreamAuth(cfg.StreamAuth)

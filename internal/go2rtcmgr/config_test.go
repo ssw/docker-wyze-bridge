@@ -1,6 +1,7 @@
 package go2rtcmgr
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,53 @@ func TestConfigBuilder_Build(t *testing.T) {
 	}
 	if _, ok := cfg.Streams["front_door"]; !ok {
 		t.Error("missing front_door stream")
+	}
+}
+
+func TestConfigBuilder_LocalOnly(t *testing.T) {
+	b := NewConfigBuilder("info", "stun:stun.l.google.com:19302", "192.168.1.50")
+	b.SetLocalOnly(true)
+	cfg := b.Build()
+
+	for name, got := range map[string]string{
+		"API.Listen":    cfg.API.Listen,
+		"RTSP.Listen":   cfg.RTSP.Listen,
+		"WebRTC.Listen": cfg.WebRTC.Listen,
+	} {
+		if !strings.HasPrefix(got, "127.0.0.1:") {
+			t.Errorf("%s = %q, want it bound to 127.0.0.1", name, got)
+		}
+	}
+	if cfg.API.Origin != "" {
+		t.Errorf("API.Origin = %q, want no cross-origin access", cfg.API.Origin)
+	}
+	if len(cfg.WebRTC.Candidates) != 0 {
+		t.Errorf("WebRTC.Candidates = %v, want none (nothing outside can connect)", cfg.WebRTC.Candidates)
+	}
+}
+
+func TestConfigBuilder_LocalOnlyWritesLoopbackYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "go2rtc.yaml")
+	b := NewConfigBuilder("info", "", "")
+	b.SetLocalOnly(true)
+	if err := b.WriteConfig(path); err != nil {
+		t.Fatalf("WriteConfig: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]map[string]interface{}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("written config is not YAML: %v", err)
+	}
+	for _, section := range []string{"api", "rtsp", "webrtc"} {
+		if got := parsed[section]["listen"]; !strings.HasPrefix(fmt.Sprint(got), "127.0.0.1:") {
+			t.Errorf("%s.listen = %v, want 127.0.0.1:<port>", section, got)
+		}
+	}
+	if origin, ok := parsed["api"]["origin"]; ok && origin != "" {
+		t.Errorf("api.origin = %v, want it absent", origin)
 	}
 }
 
