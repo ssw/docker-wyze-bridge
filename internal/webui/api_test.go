@@ -152,7 +152,7 @@ func TestHandleSnapshot_Missing(t *testing.T) {
 
 func TestHandleSnapshot_CachedServesLatestWithoutGo2RTC(t *testing.T) {
 	srv, _ := testServer(t)
-	taken := time.Date(2026, 10, 10, 21, 0, 0, 0, time.UTC)
+	taken := time.Now().Add(-30 * time.Second).Truncate(time.Second)
 	srv.OnLatestSnapshot(func(name string) ([]byte, time.Time, bool) {
 		if name != "front_door" {
 			return nil, time.Time{}, false
@@ -174,6 +174,26 @@ func TestHandleSnapshot_CachedServesLatestWithoutGo2RTC(t *testing.T) {
 	}
 	if got := w.Header().Get("Last-Modified"); got != taken.Format(http.TimeFormat) {
 		t.Errorf("Last-Modified = %q, want %q", got, taken.Format(http.TimeFormat))
+	}
+}
+
+// A camera (or go2rtc) that stopped producing frames must not keep showing
+// its last picture as if it were current: past three capture intervals the
+// cached frame is ignored and the live path decides.
+func TestHandleSnapshot_StaleCacheIsNotServed(t *testing.T) {
+	srv, _ := testServer(t) // SnapshotInterval unset: treated as 1 minute
+	srv.OnLatestSnapshot(func(string) ([]byte, time.Time, bool) {
+		return []byte("frozen"), time.Now().Add(-10 * time.Minute), true
+	})
+
+	w := httptest.NewRecorder()
+	srv.handleSnapshot(w, httptest.NewRequest("GET", "/api/snapshot/baby?cached", nil))
+
+	if got := w.Body.String(); got == "frozen" {
+		t.Fatal("served a 10-minute-old snapshot as current")
+	}
+	if got := w.Body.Bytes(); string(got) != string([]byte{0xFF, 0xD8, 0xFF, 0xE0}) {
+		t.Errorf("body = %x, want a fresh live frame instead", got)
 	}
 }
 

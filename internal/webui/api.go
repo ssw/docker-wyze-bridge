@@ -197,7 +197,7 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	// waking the camera, so dashboards polling many cameras stay fast.
 	// Falls through to a live grab until the first capture exists.
 	if r.URL.Query().Has("cached") && s.latestSnap != nil {
-		if jpeg, at, ok := s.latestSnap(name); ok {
+		if jpeg, at, ok := s.latestSnap(name); ok && time.Since(at) <= s.maxSnapshotAge() {
 			w.Header().Set("Content-Type", "image/jpeg")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Last-Modified", at.UTC().Format(http.TimeFormat))
@@ -222,6 +222,18 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(jpeg)
+}
+
+// maxSnapshotAge is how old a cached snapshot may be before ?cached stops
+// serving it: three capture intervals, so one or two missed captures are
+// tolerated but a camera (or go2rtc) that has stopped producing frames
+// shows as unavailable instead of as a frozen picture.
+func (s *Server) maxSnapshotAge() time.Duration {
+	interval := time.Duration(s.cfg.SnapshotInterval) * time.Second
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	return 3 * interval
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

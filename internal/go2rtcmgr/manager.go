@@ -25,6 +25,15 @@ type Manager struct {
 	ready      chan struct{}
 	mu         sync.Mutex
 	cancel     context.CancelFunc
+
+	// Restart backoff after an unexpected exit: starts at restartMin,
+	// doubles per consecutive failure, capped at restartMax. The camera
+	// health check re-adds streams once go2rtc answers again.
+	restartMin time.Duration
+	restartMax time.Duration
+	restarts   int
+
+	panicking bool // inside a Go panic/fatal trace on go2rtc's output
 }
 
 // NewManager creates a new go2rtc process manager.
@@ -35,6 +44,8 @@ func NewManager(binaryPath, configPath string, log zerolog.Logger) *Manager {
 		configPath: configPath,
 		apiURL:     "http://127.0.0.1:1984",
 		ready:      make(chan struct{}),
+		restartMin: 2 * time.Second,
+		restartMax: time.Minute,
 	}
 }
 
@@ -61,8 +72,10 @@ func (m *Manager) Start(ctx context.Context) error {
 			"(hint: 'pkill go2rtc' to clear an orphan)", err)
 	}
 
+	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
+	m.panicking = false
 
 	m.cmd = exec.CommandContext(ctx, m.binaryPath, "-config", m.configPath)
 	configureProcess(m.cmd)
@@ -95,19 +108,53 @@ func (m *Manager) Start(ctx context.Context) error {
 	go m.relayOutput(bufio.NewScanner(stderr))
 
 	// Monitor process exit
+	cmd := m.cmd
+	started := time.Now()
 	go func() {
-		err := m.cmd.Wait()
+		err := cmd.Wait()
 		m.mu.Lock()
 		m.cmd = nil
 		m.mu.Unlock()
-		if err != nil && ctx.Err() == nil {
-			m.log.Error().Err(err).Msg("go2rtc exited unexpectedly")
-		} else {
+		if ctx.Err() != nil {
 			m.log.Info().Msg("go2rtc stopped")
+			return
 		}
+		// Any exit we didn't ask for leaves every camera without a stream
+		// (and snapshots without frames) until go2rtc is back, so restart.
+		m.log.Error().Err(err).Msg("go2rtc exited unexpectedly; restarting")
+		go m.restart(parent, time.Since(started))
 	}()
 
 	return nil
+}
+
+// restart relaunches go2rtc after an unexpected exit, backing off while
+// it keeps failing. A run that lasted longer than restartMax resets the
+// backoff, so a crash after hours of uptime restarts quickly.
+func (m *Manager) restart(ctx context.Context, ranFor time.Duration) {
+	m.mu.Lock()
+	if ranFor > m.restartMax {
+		m.restarts = 0
+	}
+	delay := m.restartMin << min(m.restarts, 10)
+	if delay > m.restartMax {
+		delay = m.restartMax
+	}
+	m.restarts++
+	attempt := m.restarts
+	m.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(delay):
+	}
+	if err := m.Start(ctx); err != nil {
+		m.log.Error().Err(err).Int("attempt", attempt).Msg("go2rtc restart failed")
+		go m.restart(ctx, 0)
+		return
+	}
+	m.log.Warn().Int("attempt", attempt).Msg("go2rtc restarted")
 }
 
 // Stop gracefully stops the go2rtc subprocess.
@@ -203,6 +250,16 @@ func (m *Manager) emitLogLine(line string) {
 		return
 	}
 	if shouldSuppressGo2RTCLogLine(line) {
+		return
+	}
+	// A Go panic or runtime fatal error is unprefixed multi-line output.
+	// Surface all of it at error level: it's the only record of why
+	// go2rtc died.
+	if strings.HasPrefix(line, "panic:") || strings.HasPrefix(line, "fatal error:") {
+		m.panicking = true
+	}
+	if m.panicking {
+		m.log.Error().Msg(line)
 		return
 	}
 

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -105,5 +107,95 @@ func TestEmitLogLine(t *testing.T) {
 				t.Errorf("message = %q, want %q", got, tc.wantMsg)
 			}
 		})
+	}
+}
+
+func TestEmitLogLine_PanicTraceIsLoggedAtError(t *testing.T) {
+	var buf bytes.Buffer
+	m := NewManager("", "", zerolog.New(&buf).Level(zerolog.DebugLevel))
+	for _, line := range []string{
+		"panic: runtime error: index out of range [3] with length 3",
+		"",
+		"goroutine 81 [running]:",
+		"github.com/AlexxIT/go2rtc/pkg/wyze/tutk.(*Conn).handle(...)",
+		"\t/build/pkg/wyze/tutk/conn.go:212 +0x4e8",
+	} {
+		m.emitLogLine(line)
+	}
+
+	var levels, msgs []string
+	for _, raw := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var entry map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+			t.Fatalf("unmarshal %q: %v", raw, err)
+		}
+		levels = append(levels, entry["level"].(string))
+		msgs = append(msgs, entry["message"].(string))
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("logged %d lines, want all 4 non-empty trace lines: %q", len(msgs), msgs)
+	}
+	for i, level := range levels {
+		if level != "error" {
+			t.Errorf("line %d (%q) logged at %s, want error", i, msgs[i], level)
+		}
+	}
+}
+
+// A go2rtc that keeps dying is relaunched with backoff instead of being
+// left dead while the bridge carries on serving stale state.
+func TestManager_RestartsGo2RTCAfterUnexpectedExit(t *testing.T) {
+	dir := t.TempDir()
+	runs := filepath.Join(dir, "runs")
+	fake := filepath.Join(dir, "go2rtc")
+	script := "#!/bin/sh\necho run >> " + runs + "\nexit 2\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(fake, filepath.Join(dir, "go2rtc.yaml"), zerolog.Nop())
+	m.restartMin = 10 * time.Millisecond
+	m.restartMax = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, _ := os.ReadFile(runs)
+		if strings.Count(string(data), "run") >= 3 {
+			cancel()
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	data, _ := os.ReadFile(runs)
+	t.Fatalf("go2rtc ran %d time(s) in 5s; want it restarted after each exit", strings.Count(string(data), "run"))
+}
+
+func TestManager_NoRestartAfterShutdown(t *testing.T) {
+	dir := t.TempDir()
+	runs := filepath.Join(dir, "runs")
+	fake := filepath.Join(dir, "go2rtc")
+	script := "#!/bin/sh\necho run >> " + runs + "\nexec sleep 30\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(fake, filepath.Join(dir, "go2rtc.yaml"), zerolog.Nop())
+	m.restartMin = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	cancel() // the bridge shutting down
+	time.Sleep(300 * time.Millisecond)
+
+	data, _ := os.ReadFile(runs)
+	if n := strings.Count(string(data), "run"); n != 1 {
+		t.Fatalf("go2rtc ran %d times; a requested stop must not restart it", n)
 	}
 }
