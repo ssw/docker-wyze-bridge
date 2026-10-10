@@ -24,8 +24,8 @@ RUN apk add --no-cache curl ca-certificates && \
 
 FROM golang:1.26.4-alpine AS builder
 ARG BRIDGE_REPO=https://github.com/ssw/docker-wyze-bridge
-ARG BRIDGE_COMMIT=5a14271d67f299f77a536ad1b8bbdc3cda6c90b9
-ARG BRIDGE_VERSION=4.5.0-local.1
+ARG BRIDGE_COMMIT=a7518b343e001287c587a1279a599c3af954991d
+ARG BRIDGE_VERSION=4.5.0-local.2
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 RUN git init -q && git remote add origin "${BRIDGE_REPO}" && \
